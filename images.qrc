@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>mic_wifi.ico</file>
+    </qresource>
+</RCC>
