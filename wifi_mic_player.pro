@@ -27,7 +27,7 @@ DEFINES += QT_NO_COMPRESS
 
 CONFIG += embed_manifest_exe QMAKE_LFLAGS_WINDOWS += $$quote( /MANIFESTUAC:\"level=\'requireAdministrator\' uiAccess=\'false\'\" )
 
-CONFIG(release, debug|release):DEFINES += QT_NO_DEBUG_OUTPUT
+#CONFIG(release, debug|release):DEFINES += QT_NO_DEBUG_OUTPUT
 
 CONFIG += c++11
 
@@ -55,7 +55,17 @@ win32:{
 #    QMAKE_TARGET_DESCRIPTION = Описание программы
 #    QMAKE_TARGET_COPYRIGHT = Автор
 }
-	
+win32: {
+#x86
+INCLUDEPATH += $$PWD/OpenSSL/Win_x86/include/
+LIBS += -L$$PWD/OpenSSL/Win_x86/bin -llibcrypto-1_1 -llibssl-1_1
+#x64
+#INCLUDEPATH += $$PWD/OpenSSL/Win_x64/include/
+#LIBS += -L$$PWD/OpenSSL/Win_x64/bin -llibcrypto-1_1-x64 -llibssl-1_1-x64
+
+# for static build x86
+#LIBS += -L$$PWD/OpenSSL/Win_x86/bin -llibssl -llibcrypto
+}
 
 android {
     ANDROID_PACKAGE_SOURCE_DIR = $$PWD/android
@@ -64,6 +74,11 @@ android {
         android/AndroidManifest.xml \
         android/build.gradle \
         android/res/values/libs.xml
+
+    INCLUDEPATH += $$PWD/OpenSSL/Win_x86/include/
+    LIBS += -L$$PWD/OpenSSL/arm -lssl -lcrypto
+    ANDROID_EXTRA_LIBS += $$PWD/OpenSSL/arm/libssl_1_1.so
+    ANDROID_EXTRA_LIBS += $$PWD/OpenSSL/arm/libcrypto_1_1.so
 }
 
 RESOURCES += \

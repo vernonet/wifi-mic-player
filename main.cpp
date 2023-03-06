@@ -1,5 +1,5 @@
-#include "ui_mainwindow.h"
 #include "mainwindow.h"
+#include "ui_mainwindow.h"
 #include <QtGui>
 #include <QApplication>
 #include <QDialog>
@@ -23,7 +23,7 @@
 
 
 #define VOLUME       (1.0)       //0.0 to 1.0
-
+//https://www.kozco.com/tech/soundtests.html
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -35,8 +35,10 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->Volume_snd->setToolTip("Sound volume");
     ui->Volume_snd->setToolTipDuration(3000);
     ui->Volume_snd->setValue(sound_volume_setting(-1)*100);
-    //ui->url_server->addItem("http://admin:admin@wifi-mic.local:8088/rec.wav");
-    updateRecentServers();
+    //updateRecentServers();
+    QString tmp = "";
+    adjustForCurrentServers(tmp);
+    ui->url_server->addItem("RESET LIST");
     ui->url_server->setToolTip("http://login:pass@ip:port/rec.wav");
 #ifdef __ANDROID__
     ui->url_server->adjustSize();
@@ -93,10 +95,11 @@ void MainWindow::play() {
         ui->playButton->setText("STOP");
         ui->playButton->setStyleSheet("color: red");
 
-        QString url_str = ui->url_server->currentText();
+        url_str = ui->url_server->currentText();
         QString login_pass;
-        if (url_str.contains("http://")){
-            if (url_str.count(":") == 3 && url_str.count("@") == 1){
+        if (url_str.contains("http://") || url_str.contains("https://")){
+        //    if (url_str.count(":") == 3 && url_str.count("@") == 1){
+             if (url_str.count(":") == 3){
                login_pass = url_str.mid(7, url_str.indexOf("@") - 7);
                qDebug() << " login_pass" << login_pass;
             }
@@ -134,6 +137,7 @@ void MainWindow::play() {
 
         if (audioOutput && audioOutput->state() == QAudio::State::ActiveState) {
             reply_->abort();
+            audioOutput->stop();
             audioBuffer.seek(audioBuffer.size());
 
             disconnect(reply_, &QNetworkReply::finished, this,  &MainWindow::httpFinished);
@@ -157,8 +161,9 @@ void MainWindow::httpReadyRead() {
     }
     qDebug() << " httpReadyRead aviable = " << QString::asprintf("%6lld", reply_->bytesAvailable());// << " audioBuffer->pos() = " << QString::asprintf("%8lld", audioBuffer.pos());
 
-    if (posic >= 16384*3 && !started) {  //16384*2
-        if (processing_wav_header(byteArray.data())) { //not valid wav file
+    if (posic >= 16384*4 && !started) {  //16384*3
+        memcpy(wav_hdr, byteArray.data(), 44);
+        if (processing_wav_header(wav_hdr)) { //not valid wav file
             play();  //emulate press STOP
             return;
         }
@@ -169,6 +174,10 @@ void MainWindow::httpReadyRead() {
         audioBuffer.seek(44);
         audioOutput->start(&audioBuffer);
         ui->statusBar->showMessage("playing media", 2000);
+        int_buf_sze = audioOutput->bufferSize();
+        qDebug() << " audioOutput->setBufferSize2 ->" << int_buf_sze;
+        disconnect(reply_, &QIODevice::readyRead, this, &MainWindow::httpReadyRead);
+
 
     }
     QByteArray data;
@@ -183,13 +192,22 @@ void MainWindow::httpReadyRead() {
     if (posic >= byteArray.size()) {
         posic = 0;
     }
+
+    if (started) {
+        if (posic > audioBuffer.pos()) delta = posic - audioBuffer.pos();
+        else delta = (byteArray.size() + posic) - audioBuffer.pos();
+        if (audioOutput->state() == QAudio::State::SuspendedState && delta > int_buf_sze*3) {
+            audioOutput->resume();  //buffer full, continue audio
+            disconnect(reply_, &QIODevice::readyRead, this, &MainWindow::httpReadyRead);
+        }
+    }
 }
 
   void MainWindow::httpFinished() {
       if (reply_->error()) {
                   ui->statusBar->showMessage(reply_->errorString(), 2000);
                   qDebug() << " networkManager warning:" << reply_->errorString();
-                  if (reply_->errorString().contains("Host requires authentication") || reply_->errorString().contains("not found")) {
+                  if (reply_->errorString().contains("Host requires authentication") || reply_->errorString().contains("not found") || reply_->errorString().contains("is unknown")) {
                     play();  //emulate stop
                   }
                   return;
@@ -256,16 +274,19 @@ void MainWindow::httpReadyRead() {
                   //play_size = smp_rate * bits_per_sample/8 * PLAY_TIME;
                   qDebug() << " data_wav->size ->" << data_wav->chunkSize;
                   play_time_coef = format_wav->dwSamplesPerSec * format_wav->wBitsPerSample/8;
-                  play_time_sec = data_wav->chunkSize / (format_wav->dwSamplesPerSec * format_wav->wBitsPerSample/8);
+                  play_time_sec = data_wav->chunkSize / (format_wav->dwSamplesPerSec * format_wav->wChannels * format_wav->wBitsPerSample/8);
                   qDebug() << " play_time_sec ->" << play_time_sec;
-                  byteArray.resize(10 * ((format_wav->dwSamplesPerSec *format_wav->wBitsPerSample/8))); //for 10 sec  ///////////////////////////
+                  byteArray.resize(10 * ((format_wav->dwSamplesPerSec * format_wav->wChannels * format_wav->wBitsPerSample/8))); //for 10 sec  ///////////////////////////
                   audioBuffer.setBuffer(&byteArray);
                   audioBuffer.open(QBuffer::ReadWrite);
                   audioOutput = new QAudioOutput(format, this);
-                  audioOutput->setNotifyInterval(20);
+                  audioOutput->setNotifyInterval(50);
                   connect(audioOutput, &QAudioOutput::stateChanged, this, &MainWindow::handleStateChanged);
                   connect(audioOutput, &QAudioOutput::notify, this, &MainWindow::handleNotify);
-                  audioOutput->setBufferSize(SIZE_AUDIO_BUF_IN_SEC * ((format_wav->dwSamplesPerSec *format_wav->wBitsPerSample/8))); //////////////////
+                  quint64 tmp = ((format_wav->dwSamplesPerSec * format_wav->wChannels * format_wav->wBitsPerSample/8) * SIZE_AUDIO_BUF_IN_SEC);
+                  audioOutput->setBufferSize(tmp); //////////////////
+                  qDebug() << " audioOutput->setBufferSize1 ->" << tmp;
+
 #ifdef __ANDROID__
                   audioOutput->setVolume(0.99);
 #else
@@ -282,10 +303,12 @@ void MainWindow::httpReadyRead() {
       qWarning() << " audioOutput state -> " << state;
       switch (state) {
       case QAudio::IdleState:
+              if (play_started) play();
               audioOutput->stop();
               audioBuffer.close();
               byteArray.clear();
               disconnect(audioOutput, &QAudioOutput::stateChanged, this, &MainWindow::handleStateChanged);
+              posic = 0;
               delete audioOutput;
               audioOutput = nullptr;
           break;
@@ -318,12 +341,26 @@ void MainWindow::httpReadyRead() {
       QStringList recentServers =
               settings.value("recentServers").toStringList();
       recentServers.removeAll(server_str);
-      recentServers.prepend(server_str);
+      if (server_str.size()) recentServers.prepend(server_str);
       while (recentServers.size() > maxSrvNr)
             recentServers.removeLast();
       if (!settings.isWritable() || settings.status() != QSettings::NoError)
           qDebug() << " error ->" << settings.status();
-      settings.setValue("recentServers", recentServers);
+      if (recentServers.size() > 0) {
+          settings.setValue("recentServers", recentServers);
+      }
+      else {  //if the file is empty
+          qDebug() << recentServers.size();
+          recentServers.append("http://admin:admin@wifi-mic.local:8088/rec.wav");
+          recentServers.append("https://www.kozco.com/tech/LRMonoPhase4.wav");
+          recentServers.append("https://www.kozco.com/tech/piano2.wav");
+          recentServers.append("https://www.kozco.com/tech/c304-2.wav");
+          recentServers.append("https://www.kozco.com/tech/WAV-MP3.wav");
+          recentServers.append("https://www.kozco.com/tech/audio/pulse-17.wav");
+          settings.setValue("recentServers", recentServers);
+          qDebug() << " fill defaults servers";
+      }
+
       settings.sync();
 
       updateRecentServers();
@@ -349,7 +386,7 @@ void MainWindow::httpReadyRead() {
       }
 
       if (recentServers_.size() == 0) {
-          ui->url_server->addItem("http://admin:admin@wifi-mic.local:8088/rec.wav");
+ //         ui->url_server->addItem("http://admin:admin@wifi-mic.local:8088/rec.wav");
           qDebug() << " comboBox->addItem ->" <<  ui->url_server->currentText();
       }
 
@@ -379,11 +416,61 @@ void MainWindow::httpReadyRead() {
       ui->time_lbl->setText(thisDT.toString("mm:ss"));
       ui->progressBar->setValue(audioOutput->processedUSecs()/1000000);
 
+      //audio has ended
+      if (audioOutput->processedUSecs()/1000000 >= play_time_sec) {
+          byteArray.truncate(posic);
+          return;
+      }
+
       if (audioBuffer.pos() == audioBuffer.size()) {
           audioBuffer.seek(0);
           qDebug() << " audioBuffer.pos -> " << audioBuffer.pos();
       }
 
+      if (posic > audioBuffer.pos()) delta = posic - audioBuffer.pos();
+          else delta = (byteArray.size() + posic) - audioBuffer.pos();
+      if (delta > (byteArray.size()/10)*9) {
+          qDebug() << " delta > MAX";
+          return;
+      }
+      if ((play_time_sec - audioOutput->processedUSecs()/1000000) > 1) {
+          if (delta < int_buf_sze) {  //temporarily stop the audio until the buffers are full
+              audioOutput->suspend();
+              connect(reply_, &QIODevice::readyRead, this, &MainWindow::httpReadyRead);
+          }
+      }
+      qDebug() << " delta  ->" << delta;
+      QByteArray data;
+      int32_t sze;
+      sze = reply_->bytesAvailable();
+      if ((posic + sze) > byteArray.size()) {
+          sze = byteArray.size() - posic;
+      }
+      data = reply_->read(sze);
+      byteArray.replace(posic, sze, data);
+      posic+= sze;
+      if (posic >= byteArray.size()) {
+          posic = 0;
+      }
+
+  }
+
+  void MainWindow::on_url_server_currentIndexChanged(const QString &arg1) {
+      if (arg1 == "RESET LIST") {
+          QSettings::setPath(QSettings::Format::IniFormat, QSettings::Scope::UserScope, ".");
+          QSettings settings("recent_srv.ini", QSettings::IniFormat);
+          QStringList recentServers =
+                  settings.value("recentServers").toStringList();
+
+          while (recentServers.size() > 0)
+              recentServers.removeLast();
+          if (!settings.isWritable() || settings.status() != QSettings::NoError)
+              qDebug() << " error ->" << settings.status();
+          settings.setValue("recentServers", recentServers);
+          settings.sync();
+          QString tmp = "";
+          adjustForCurrentServers(tmp);
+      }
   }
 
   int main(int argc, char *argv[]) {

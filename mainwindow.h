@@ -21,7 +21,7 @@
 #include <QLabel>
 
 
-#define SIZE_AUDIO_BUF_IN_SEC    (1/4)     //1 sec
+#define SIZE_AUDIO_BUF_IN_SEC    1/5     //1 sec
 #define TCP_READ_BUFF_SIZE       (8192*2)
 
 namespace Ui {
@@ -49,6 +49,7 @@ private slots:
   void adjustForCurrentServers(QString &server_str);
   void onAuthenticationRequest(QNetworkReply *,QAuthenticator *aAuthenticator);
   qreal sound_volume_setting(qreal snd_vol);
+  void on_url_server_currentIndexChanged(const QString &arg1);
 
 private:
   QAudioOutput *audioOutput = nullptr;
@@ -64,8 +65,13 @@ private:
   uint32_t play_time_sec = 0;
   uint32_t play_time_coef;
   bool play_started = false;
-  int posic = 0;
-  uint8_t maxSrvNr = 5;
+  qint32 posic = 0;
+  uint8_t maxSrvNr = 7;
+  qint32 delta;
+  qint32 int_buf_sze=0;
+  char wav_hdr[44];
+  QString url_str ="";
+
 };
 
 
