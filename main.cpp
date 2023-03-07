@@ -280,12 +280,12 @@ void MainWindow::httpReadyRead() {
                   audioBuffer.setBuffer(&byteArray);
                   audioBuffer.open(QBuffer::ReadWrite);
                   audioOutput = new QAudioOutput(format, this);
-                  audioOutput->setNotifyInterval(50);
+                  audioOutput->setNotifyInterval(50);  //20 or 50
                   connect(audioOutput, &QAudioOutput::stateChanged, this, &MainWindow::handleStateChanged);
                   connect(audioOutput, &QAudioOutput::notify, this, &MainWindow::handleNotify);
                   quint64 tmp = ((format_wav->dwSamplesPerSec * format_wav->wChannels * format_wav->wBitsPerSample/8) * SIZE_AUDIO_BUF_IN_SEC);
                   audioOutput->setBufferSize(tmp); //////////////////
-                  qDebug() << " audioOutput->setBufferSize1 ->" << tmp;
+                  qDebug() << " audioOutput->setBufferSize1 ->" << tmp << "byteArray.size -> " << byteArray.size();
 
 #ifdef __ANDROID__
                   audioOutput->setVolume(0.99);
@@ -422,7 +422,7 @@ void MainWindow::httpReadyRead() {
           return;
       }
 
-      if (audioBuffer.pos() == audioBuffer.size()) {
+      if (audioBuffer.atEnd()) {
           audioBuffer.seek(0);
           qDebug() << " audioBuffer.pos -> " << audioBuffer.pos();
       }
@@ -430,7 +430,7 @@ void MainWindow::httpReadyRead() {
       if (posic > audioBuffer.pos()) delta = posic - audioBuffer.pos();
           else delta = (byteArray.size() + posic) - audioBuffer.pos();
       if (delta > (byteArray.size()/10)*9) {
-          qDebug() << " delta > MAX";
+          qDebug() << " delta > MAX" <<  delta;
           return;
       }
       if ((play_time_sec - audioOutput->processedUSecs()/1000000) > 1) {
@@ -446,13 +446,17 @@ void MainWindow::httpReadyRead() {
       if ((posic + sze) > byteArray.size()) {
           sze = byteArray.size() - posic;
       }
-      data = reply_->read(sze);
-      byteArray.replace(posic, sze, data);
-      posic+= sze;
-      if (posic >= byteArray.size()) {
-          posic = 0;
-      }
 
+      if ((sze + delta) >  ((byteArray.size()/10)*9))  sze = (byteArray.size()/10)*9 - delta;
+
+      if (sze > 0) {
+          data = reply_->read(sze);
+          byteArray.replace(posic, sze, data);
+          posic+= sze;
+          if (posic >= byteArray.size()) {
+              posic = 0;
+          }
+      }
   }
 
   void MainWindow::on_url_server_currentIndexChanged(const QString &arg1) {
